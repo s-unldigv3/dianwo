@@ -35,6 +35,27 @@ async function ensureTables(env) {
       shared_token TEXT
     )`
   ).run();
+  
+  // 使用名为 db1 的 SQL 数据库存储原先的 KV（sessions, shares）
+  try {
+    await env.db1.prepare(
+      `CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id TEXT,
+        expire_at INTEGER
+      )`
+    ).run();
+
+    await env.db1.prepare(
+      `CREATE TABLE IF NOT EXISTS shares (
+        token TEXT PRIMARY KEY,
+        notebook_id TEXT,
+        expire_at INTEGER
+      )`
+    ).run();
+  } catch (e) {
+    console.warn('创建 db1 表失败（可能环境未提供 db1）:', e.message);
+  }
 
   // Ensure owner exists
   const owner = await env.db.prepare('SELECT * FROM users WHERE username = ?').bind('sunldigv3').first();
@@ -87,7 +108,9 @@ async function createSession(env, userId) {
   if (!userId) throw new Error('用户ID不能为空');
   const token = genId();
   // 7 days
-  await env.SESSIONS.put('s:' + token, userId, { expirationTtl: 60 * 60 * 24 * 7 });
+  const expire = Date.now() + 1000 * 60 * 60 * 24 * 7;
+  await env.db1.prepare('INSERT OR REPLACE INTO sessions (token, user_id, expire_at) VALUES (?,?,?)')
+    .bind(token, userId, expire).run();
   return token;
 }
 
@@ -99,10 +122,20 @@ async function getUserFromSession(env, request) {
     
     const token = cookie.split('=')[1];
     if (!token) return null;
-    
-    const userId = await env.SESSIONS.get('s:' + token);
+    // 从 db1.sessions 中查找，优先使用 SQL 存储
+    let userId = null;
+    try {
+      const now = Date.now();
+      const row = await env.db1.prepare('SELECT user_id FROM sessions WHERE token = ? AND (expire_at IS NULL OR expire_at > ?)')
+        .bind(token, now).first();
+      if (row && row.user_id) userId = row.user_id;
+    } catch (e) {
+      console.error('从 db1 读取会话失败:', e);
+      return null;
+    }
+
     if (!userId) return null;
-    
+
     const user = await env.db.prepare('SELECT id, username, role FROM users WHERE id = ?').bind(userId).first();
     return user || null;
   } catch (e) {
@@ -201,7 +234,11 @@ async function apiLogout(request, env) {
     
     if (cookie) {
       const token = cookie.split('=')[1];
-      await env.SESSIONS.delete('s:' + token);
+      try {
+        await env.db1.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
+      } catch (e) {
+        console.error('删除 session 失败:', e);
+      }
     }
     
     const res = json({ ok: true });
@@ -348,8 +385,10 @@ async function apiShareNotebook(request, env, id) {
     if (!row) return json({ error: '未找到笔记' }, 404);
     
     const token = genId();
-    await env.SHARES.put('sh:' + token, JSON.stringify({ id }), { expirationTtl: 60 * 60 * 24 * 30 });
-    
+    const expire = Date.now() + 1000 * 60 * 60 * 24 * 30;
+    await env.db1.prepare('INSERT OR REPLACE INTO shares (token, notebook_id, expire_at) VALUES (?,?,?)')
+      .bind(token, id, expire).run();
+
     // also store token in notebook for direct lookup
     await env.db.prepare('UPDATE notebooks SET shared_token = ? WHERE id = ?').bind(token, id).run();
     
@@ -505,11 +544,18 @@ async function handleShare(request, env) {
   try {
     const token = request.url.split('/share/')[1]?.split('?')[0]?.split('#')[0];
     if (!token) return new Response('分享不存在', { status: 404 });
-    
-    const data = await env.SHARES.get('sh:' + token);
-    if (!data) return new Response('分享不存在或已过期', { status: 404 });
-    
-    const obj = JSON.parse(data);
+    // 优先使用 db1.shares
+    let obj = null;
+    try {
+      const now = Date.now();
+      const row = await env.db1.prepare('SELECT notebook_id FROM shares WHERE token = ? AND (expire_at IS NULL OR expire_at > ?)')
+        .bind(token, now).first();
+      if (!row || !row.notebook_id) return new Response('分享不存在或已过期', { status: 404 });
+      obj = { id: row.notebook_id };
+    } catch (e) {
+      console.error('读取 share 失败:', e);
+      return new Response('分享链接无效', { status: 500 });
+    }
     const row = await env.db.prepare('SELECT title, content FROM notebooks WHERE id = ?').bind(obj.id).first();
     
     if (!row) return new Response('未找到内容', { status: 404 });
@@ -569,9 +615,9 @@ function renderHtmlApp() {
   <title>${L.title}</title>
   <style>
     :root{
-      --primary: #6200ee;
-      --primary-dark: #3700b3;
-      --primary-light: #bb86fc;
+      --primary: #64b5f6;
+      --primary-dark: #2b8fd6;
+      --primary-light: #bfe9ff;
       --secondary: #03dac6;
       --background: #f5f5f5;
       --surface: #ffffff;
@@ -716,7 +762,7 @@ function renderHtmlApp() {
     }
     
     .notebook.selected {
-      background-color: rgba(98, 0, 238, 0.05);
+      background-color: rgba(100, 181, 246, 0.05);
     }
     
     .notebook.selected::after {
@@ -1035,7 +1081,7 @@ function renderHtmlApp() {
     .auth-field input:focus {
       outline: none;
       border-color: var(--primary);
-      box-shadow: 0 0 0 2px rgba(98, 0, 238, 0.2);
+      box-shadow: 0 0 0 2px rgba(100, 181, 246, 0.2);
     }
     
     .account-menu {
@@ -1902,7 +1948,7 @@ function renderAdminPage() {
     .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
     .btn-danger { background: #ff4444; color: white; }
     .btn-warning { background: #ff8800; color: white; }
-    .btn-primary { background: #6200ee; color: white; }
+    .btn-primary { background: #64b5f6; color: white; }
     .btn-outline { background: transparent; border: 1px solid #6200ee; color: #6200ee; }
     .modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; display: none; }
     .modal-content { background: white; border-radius: 8px; padding: 24px; min-width: 400px; }
