@@ -35,6 +35,6 @@ https://clickhere.dpdns.org
 ### 技术栈
 - 运行环境：Cloudflare Worker
 - 数据库：Cloudflare D1（SQLite 兼容）
-- 缓存 / 会话：Cloudflare KV
+- 缓存 / 会话：Cloudflare D1
 - 前端：原生 HTML/CSS/JS（无框架）
-- 鉴权：Cookie + KV 会话存储
+- 鉴权：Cookie + D1 会话存储
