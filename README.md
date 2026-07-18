@@ -19,9 +19,9 @@
 
 
 ## 部署步骤
-- 在*cloudflare*中创建*work*,名称任意
+- 在*cloudflare*中创建*workers*,名称任意
 - 创建*D1 SQL数据库*，名称为*db*,创建*D1 SQL数据库*，名称为*db1*
-- 将两个*D1 SQL数据库*绑定到*work*
+- 将两个*D1 SQL数据库*绑定到*workers*
 - 绑定自定义域名即可访问
 
 注：beta文件夹中的文件绑定的是名为*SHARES*和*SESSIONS*的*kv命名空间*和名为*db*的*D1 SQL数据库*
