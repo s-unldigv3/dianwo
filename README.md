@@ -1,6 +1,6 @@
 # 点我! -轻飘飘的在线记事本
 
-一个基于 Cloudflare Worker + D1 构建的轻量级在线记事本应用，支持用户注册/登录、笔记管理、分享功能，以及管理员后台管理。
+一个基于 Cloudflare Workers + D1 构建的轻量级在线记事本应用，支持用户注册/登录、笔记管理、分享功能，以及管理员后台管理。
 
 ## 功能特性
 ### 核心功能
@@ -33,7 +33,7 @@
 https://clickhere.dpdns.org
 
 ### 技术栈
-- 运行环境：Cloudflare Worker
+- 运行环境：Cloudflare Workers
 - 数据库：Cloudflare D1（SQLite 兼容）
 - 缓存 / 会话：Cloudflare D1
 - 前端：原生 HTML/CSS/JS（无框架）
